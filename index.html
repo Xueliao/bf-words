@@ -157,6 +157,36 @@
   <button class="btn" id="quizNext" style="width:100%; display:none">下一题 →</button>
 </div>
 
+<!-- 拼写 -->
+<div class="view" id="v-spell">
+  <div class="toolbar">
+    <select id="spellScope">
+      <option value="unmastered">未掌握</option>
+      <option value="all">全部单词</option>
+    </select>
+    <label class="opt"><input type="checkbox" id="spellAuto" checked> 答后发音</label>
+  </div>
+  <div class="card" style="padding:24px 16px">
+    <div id="spellCN" style="font-size:1.25rem;font-weight:600;text-align:center"></div>
+    <div id="spellMeta" style="text-align:center;color:#888;margin-top:6px;font-size:.9rem"></div>
+    <div id="spellCol" style="text-align:center;color:#667;margin-top:8px;font-size:.85rem"></div>
+    <div id="spellHint" style="text-align:center;margin-top:16px;font-size:1.35rem;letter-spacing:3px;color:#1565c0;font-family:monospace;min-height:1.6em"></div>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <input type="text" id="spellInput" placeholder="输入英文单词后回车" autocomplete="off"
+           autocapitalize="off" autocorrect="off" spellcheck="false"
+           style="flex:1;font-size:1.1rem;padding:12px">
+    <button class="btn" id="spellGo">确定</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button class="btn ghost" id="spellHintBtn" style="flex:1">💡 提示一个字母</button>
+    <button class="btn ghost" id="spellSkip" style="flex:1">跳过 →</button>
+  </div>
+  <div id="spellResult" style="margin-top:12px"></div>
+  <div id="spellScore" style="text-align:center;color:#666;font-size:.9rem;margin-top:10px"></div>
+  <button class="btn" id="spellNext" style="width:100%;display:none;margin-top:8px">下一个 →</button>
+</div>
+
 <!-- 统计 -->
 <div class="view" id="v-stats">
   <div class="card">
@@ -167,10 +197,12 @@
     <div id="statPris"></div>
     <hr style="border:none;border-top:1px solid #eee;margin:10px 0">
     <div class="statRow"><span>测验累计</span><span id="statQuiz">0 题，正确率 0%</span></div>
+    <div class="statRow"><span>拼写累计</span><span id="statSpell">0 题，正确率 0%</span></div>
     <hr style="border:none;border-top:1px solid #eee;margin:10px 0">
     <div class="row" style="margin-top:6px">
       <button class="btn danger" id="resetM" style="flex:1">重置掌握进度</button>
       <button class="btn danger" id="resetQ" style="flex:1">重置测验记录</button>
+      <button class="btn danger" id="resetS" style="flex:1">重置拼写记录</button>
     </div>
   </div>
 </div>
@@ -179,6 +211,7 @@
   <button class="on" data-v="v-list"><span class="ico">📋</span>列表</button>
   <button data-v="v-flash"><span class="ico">🃏</span>闪卡</button>
   <button data-v="v-quiz"><span class="ico">✏️</span>测验</button>
+  <button data-v="v-spell"><span class="ico">📝</span>拼写</button>
   <button data-v="v-stats"><span class="ico">📊</span>统计</button>
 </nav>
 
@@ -192,8 +225,10 @@ const LS = {
 };
 let mastered = new Set(LS.get('mastered', []));
 let quizStats = LS.get('quiz', { total: 0, correct: 0 });
+let spellStats = LS.get('spell', { total: 0, correct: 0 });
 const saveM = () => LS.set('mastered', [...mastered]);
 const saveQ = () => LS.set('quiz', quizStats);
+const saveS = () => LS.set('spell', spellStats);
 
 /* ---------- 发音：在线真人发音，失败回退 TTS ---------- */
 const audioEl = new Audio();
@@ -228,6 +263,7 @@ document.querySelectorAll('nav button').forEach(b => b.addEventListener('click',
   if (b.dataset.v === 'v-stats') renderStats();
   if (b.dataset.v === 'v-flash' && !deck.length) newDeck();
   if (b.dataset.v === 'v-quiz' && !quizLock && !quizOpts.children.length) nextQuiz();
+  if (b.dataset.v === 'v-spell' && !spellWord) nextSpell();
 }));
 
 /* ---------- 列表 ---------- */
@@ -381,6 +417,88 @@ function nextQuiz() {
 document.getElementById('quizNext').addEventListener('click', nextQuiz);
 document.getElementById('quizScope').addEventListener('change', () => { quizOpts.innerHTML=''; document.getElementById('quizScore').textContent=''; nextQuiz(); });
 
+/* ---------- 拼写 ---------- */
+let spellWord = null, spellShown = 0, spellLock = false;
+const spellInput = document.getElementById('spellInput');
+function sPool() {
+  const scope = document.getElementById('spellScope').value;
+  return DATA.filter(d => scope === 'all' || !mastered.has(d.w));
+}
+function renderSpellHint() {
+  if (!spellWord) return;
+  document.getElementById('spellHint').textContent = spellWord.w.split('').map((c, i) =>
+    i < spellShown ? c : (/[\s\-\/]/.test(c) ? c : '_')
+  ).join(' ');
+}
+function nextSpell() {
+  spellLock = false;
+  document.getElementById('spellNext').style.display = 'none';
+  document.getElementById('spellResult').innerHTML = '';
+  const p = sPool();
+  if (!p.length) {
+    spellWord = null;
+    document.getElementById('spellCN').textContent = '🎉 没有可练的单词了';
+    document.getElementById('spellMeta').textContent = '已全部掌握！可在上方切换「全部单词」';
+    document.getElementById('spellCol').textContent = '';
+    document.getElementById('spellHint').textContent = '';
+    return;
+  }
+  spellWord = p[Math.floor(Math.random() * p.length)];
+  spellShown = 0;
+  document.getElementById('spellCN').textContent = spellWord.cn;
+  document.getElementById('spellMeta').textContent = [spellWord.pos, spellWord.p].filter(Boolean).join('  ');
+  document.getElementById('spellCol').textContent = spellWord.col ? `📎 ${spellWord.colcn || spellWord.col}` : '';
+  renderSpellHint();
+  spellInput.value = '';
+  setTimeout(() => spellInput.focus(), 150);
+}
+function checkSpell() {
+  if (spellLock || !spellWord) return;
+  const ans = spellInput.value.trim().toLowerCase();
+  if (!ans) { spellInput.focus(); return; }
+  spellLock = true;
+  spellStats.total++;
+  const w = spellWord.w, t = w.toLowerCase();
+  const right = ans === t;
+  if (right) spellStats.correct++;
+  saveS();
+  const box = document.getElementById('spellResult');
+  let html;
+  if (right) {
+    html = `<div class="card" style="background:#e6f4ea;color:#2e7d32;text-align:center">
+      <div style="font-size:1.1rem;font-weight:600">✓ 拼写正确！</div>
+      <div style="font-family:monospace;font-size:1.4rem;letter-spacing:2px;margin-top:6px">${esc(w)}</div></div>`;
+  } else {
+    let chars = '';
+    for (let i = 0; i < w.length; i++) {
+      const ok = ans[i] === t[i];
+      chars += `<span style="color:${ok ? '#2e7d32' : '#c62828'}">${esc(w[i])}</span>`;
+    }
+    html = `<div class="card" style="background:#fdecea;text-align:center">
+      <div style="color:#c62828;font-weight:600">✗ 正确拼写（红字为出错位置）：</div>
+      <div style="font-family:monospace;font-size:1.4rem;letter-spacing:2px;margin-top:6px">${chars}</div>
+      <div style="color:#888;font-size:.85rem;margin-top:6px">你输入的：${esc(spellInput.value.trim())}</div></div>`;
+  }
+  box.innerHTML = html;
+  if (document.getElementById('spellAuto').checked) speak(w);
+  document.getElementById('spellScore').textContent =
+    `拼写累计 ${spellStats.total} 题 · 正确 ${spellStats.correct} · 正确率 ${Math.round(spellStats.correct / spellStats.total * 100)}%`;
+  document.getElementById('spellNext').style.display = 'block';
+  document.getElementById('spellNext').focus();
+}
+document.getElementById('spellGo').addEventListener('click', checkSpell);
+document.getElementById('spellNext').addEventListener('click', nextSpell);
+document.getElementById('spellSkip').addEventListener('click', nextSpell);
+document.getElementById('spellScope').addEventListener('change', nextSpell);
+document.getElementById('spellHintBtn').addEventListener('click', () => {
+  if (!spellWord || spellLock) return;
+  if (spellShown < spellWord.w.length) { spellShown++; renderSpellHint(); }
+  spellInput.focus();
+});
+spellInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { spellLock ? nextSpell() : checkSpell(); }
+});
+
 /* ---------- 统计 ---------- */
 function renderStats() {
   const t = DATA.length, m = mastered.size;
@@ -401,12 +519,17 @@ function renderStats() {
   const qs = quizStats;
   document.getElementById('statQuiz').textContent =
     qs.total ? `${qs.total} 题，正确率 ${Math.round(qs.correct / qs.total * 100)}%` : '还没有测验记录';
+  document.getElementById('statSpell').textContent =
+    spellStats.total ? `${spellStats.total} 题，正确率 ${Math.round(spellStats.correct / spellStats.total * 100)}%` : '还没有拼写记录';
 }
 document.getElementById('resetM').addEventListener('click', () => {
   if (confirm('确定清空所有「已掌握」标记？')) { mastered.clear(); saveM(); updateHead(); renderStats(); renderList(true); }
 });
 document.getElementById('resetQ').addEventListener('click', () => {
   if (confirm('确定清空测验记录？')) { quizStats = { total: 0, correct: 0 }; saveQ(); renderStats(); }
+});
+document.getElementById('resetS').addEventListener('click', () => {
+  if (confirm('确定清空拼写记录？')) { spellStats = { total: 0, correct: 0 }; saveS(); renderStats(); }
 });
 
 /* ---------- 启动 ---------- */
