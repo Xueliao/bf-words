@@ -164,10 +164,14 @@
       <option value="unmastered">未掌握</option>
       <option value="all">全部单词</option>
     </select>
+    <label class="opt"><input type="checkbox" id="spellAutoNew" checked> 新题发音</label>
     <label class="opt"><input type="checkbox" id="spellAuto" checked> 答后发音</label>
   </div>
   <div class="card" style="padding:24px 16px">
-    <div id="spellCN" style="font-size:1.25rem;font-weight:600;text-align:center"></div>
+    <div style="text-align:center">
+      <span id="spellCN" style="font-size:1.25rem;font-weight:600"></span>
+      <button class="spk" id="spellSpk" title="播放发音" style="font-size:1.3rem;vertical-align:middle">🔊</button>
+    </div>
     <div id="spellMeta" style="text-align:center;color:#888;margin-top:6px;font-size:.9rem"></div>
     <div id="spellCol" style="text-align:center;color:#667;margin-top:8px;font-size:.85rem"></div>
     <div id="spellHint" style="text-align:center;margin-top:16px;font-size:1.35rem;letter-spacing:3px;color:#1565c0;font-family:monospace;min-height:1.6em"></div>
@@ -450,6 +454,7 @@ function nextSpell() {
   document.getElementById('spellCol').textContent = spellWord.col ? `📎 ${spellWord.colcn || spellWord.col}` : '';
   renderSpellHint();
   spellInput.value = '';
+  if (document.getElementById('spellAutoNew').checked) speak(spellWord.w);
   setTimeout(() => spellInput.focus(), 150);
 }
 function checkSpell() {
@@ -487,6 +492,7 @@ function checkSpell() {
   document.getElementById('spellNext').focus();
 }
 document.getElementById('spellGo').addEventListener('click', checkSpell);
+document.getElementById('spellSpk').addEventListener('click', () => { if (spellWord) speak(spellWord.w); });
 document.getElementById('spellNext').addEventListener('click', nextSpell);
 document.getElementById('spellSkip').addEventListener('click', nextSpell);
 document.getElementById('spellScope').addEventListener('change', nextSpell);
