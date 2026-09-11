@@ -215,6 +215,17 @@
       <button class="btn danger" id="resetQ" style="flex:1">重置测验记录</button>
       <button class="btn danger" id="resetS" style="flex:1">重置拼写记录</button>
     </div>
+    <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+    <div style="font-size:.95rem;margin-bottom:6px">💾 进度备份（换设备 / 防清理丢失）</div>
+    <div class="row">
+      <button class="btn ghost" id="expBtn" style="flex:1">📤 导出进度码</button>
+      <button class="btn ghost" id="impBtn" style="flex:1">📥 导入进度码</button>
+    </div>
+    <textarea id="backupBox" placeholder="点「导出」后进度码显示在这里；把之前保存的进度码粘贴到这里再点「导入」即可恢复"
+      style="width:100%;margin-top:8px;font-size:.75rem;padding:8px;border:1px solid #ccc;border-radius:8px;min-height:64px;font-family:monospace;resize:vertical"></textarea>
+    <div id="backupMsg" style="font-size:.85rem;margin-top:4px;text-align:center;min-height:1.2em"></div>
+    <div style="font-size:.75rem;color:#999;margin-top:4px">建议：每周导出一次，把进度码粘贴到微信收藏或备忘录里保存。</div>
+    </div>
   </div>
 </div>
 
@@ -578,6 +589,47 @@ document.getElementById('resetQ').addEventListener('click', () => {
 });
 document.getElementById('resetS').addEventListener('click', () => {
   if (confirm('确定清空拼写记录？')) { spellStats = { total: 0, correct: 0 }; saveS(); renderStats(); }
+});
+
+/* ---------- 进度备份：导出 / 导入 ---------- */
+const b64e = s => btoa(unescape(encodeURIComponent(s)));
+const b64d = s => decodeURIComponent(escape(atob(s)));
+const VALID_WORDS = new Set(DATA.map(d => d.w));
+document.getElementById('expBtn').addEventListener('click', async () => {
+  const code = 'BF1.' + b64e(JSON.stringify({
+    v: 1, learned: learnedCount, mastered: [...mastered], quiz: quizStats, spell: spellStats
+  }));
+  const box = document.getElementById('backupBox');
+  const msg = document.getElementById('backupMsg');
+  box.value = code;
+  let copied = false;
+  try { await navigator.clipboard.writeText(code); copied = true; }
+  catch (e) { box.focus(); box.select(); try { copied = document.execCommand('copy'); } catch (e2) {} }
+  msg.style.color = '#2e7d32';
+  msg.textContent = copied
+    ? '✅ 进度码已复制！粘贴到微信收藏或备忘录保存'
+    : '请长按上方进度码，全选并复制保存';
+});
+document.getElementById('impBtn').addEventListener('click', () => {
+  const raw = document.getElementById('backupBox').value.trim();
+  const msg = document.getElementById('backupMsg');
+  try {
+    if (!raw.startsWith('BF1.')) throw new Error('格式不对');
+    const d = JSON.parse(b64d(raw.slice(4)));
+    if (typeof d.learned !== 'number' || !Array.isArray(d.mastered)) throw new Error('格式不对');
+    learnedCount = Math.max(0, Math.min(Math.floor(d.learned), DATA.length));
+    mastered = new Set(d.mastered.filter(w => VALID_WORDS.has(w)));
+    quizStats = (d.quiz && typeof d.quiz.total === 'number') ? d.quiz : { total: 0, correct: 0 };
+    spellStats = (d.spell && typeof d.spell.total === 'number') ? d.spell : { total: 0, correct: 0 };
+    saveM(); saveQ(); saveS(); saveL();
+    updateHead(); renderBatch(); renderList(true); renderStats();
+    deck = []; quizOpts.innerHTML = '';   // 让闪卡/测验下次进入时重新出题
+    msg.style.color = '#2e7d32';
+    msg.textContent = `✅ 恢复成功：已推送 ${learnedCount} 词 · 已掌握 ${mastered.size} 词`;
+  } catch (e) {
+    msg.style.color = '#c62828';
+    msg.textContent = '❌ 进度码无效，请确认完整复制（以 BF1. 开头）';
+  }
 });
 
 /* ---------- 启动 ---------- */
