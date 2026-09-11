@@ -97,9 +97,15 @@
 
 <!-- 列表 -->
 <div class="view active" id="v-list">
+  <div class="card" style="margin-bottom:10px;padding:14px 16px">
+    <div class="statRow" style="padding:0 0 4px"><span>📚 学习进度</span><span id="batchInfo"></span></div>
+    <div class="bar"><i id="batchBar" style="width:0%"></i></div>
+    <button class="btn" id="getBatch" style="width:100%;margin-top:6px"></button>
+  </div>
   <div class="toolbar">
     <input type="text" id="search" placeholder="🔍 搜索单词 / 中文">
     <label class="opt"><input type="checkbox" id="listHideM"> 隐藏已掌握</label>
+    <label class="opt"><input type="checkbox" id="showAllLib"> 浏览全部词库</label>
   </div>
   <div class="chips" id="priChips"></div>
   <div id="wordList"></div>
@@ -200,6 +206,7 @@
     </div>
     <div id="statPris"></div>
     <hr style="border:none;border-top:1px solid #eee;margin:10px 0">
+    <div class="statRow"><span>学习推送</span><span id="statPush"></span></div>
     <div class="statRow"><span>测验累计</span><span id="statQuiz">0 题，正确率 0%</span></div>
     <div class="statRow"><span>拼写累计</span><span id="statSpell">0 题，正确率 0%</span></div>
     <hr style="border:none;border-top:1px solid #eee;margin:10px 0">
@@ -230,9 +237,28 @@ const LS = {
 let mastered = new Set(LS.get('mastered', []));
 let quizStats = LS.get('quiz', { total: 0, correct: 0 });
 let spellStats = LS.get('spell', { total: 0, correct: 0 });
+let learnedCount = LS.get('learned', 0);   // 已推送的单词数（按词库顺序取前 N 个）
 const saveM = () => LS.set('mastered', [...mastered]);
 const saveQ = () => LS.set('quiz', quizStats);
 const saveS = () => LS.set('spell', spellStats);
+const saveL = () => LS.set('learned', learnedCount);
+
+/* ---------- 分批推送 ---------- */
+const BATCH = 8;
+const learnedPool = () => DATA.slice(0, learnedCount);
+let showAllLib = false;
+function renderBatch() {
+  document.getElementById('batchInfo').textContent =
+    `已推送 ${learnedCount} / ${DATA.length} 词 · 已领 ${Math.ceil(learnedCount / BATCH)} 组`;
+  document.getElementById('batchBar').style.width = Math.round(learnedCount / DATA.length * 100) + '%';
+  const btn = document.getElementById('getBatch');
+  if (learnedCount >= DATA.length) {
+    btn.disabled = true; btn.style.background = '#9e9e9e';
+    btn.textContent = '🎉 词库已全部推送完毕';
+  } else {
+    btn.textContent = `📦 领取下一组 ${Math.min(BATCH, DATA.length - learnedCount)} 个单词`;
+  }
+}
 
 /* ---------- 发音：在线真人发音，失败回退 TTS ---------- */
 const audioEl = new Audio();
@@ -292,7 +318,8 @@ document.getElementById('listHideM').addEventListener('change', e => { listFilte
 document.getElementById('listMore').addEventListener('click', () => renderList(false));
 
 function filteredList() {
-  return DATA.filter(d =>
+  const base = showAllLib ? DATA : learnedPool();
+  return base.filter(d =>
     (!listFilter.pri || d.pri === listFilter.pri) &&
     (!listFilter.hideM || !mastered.has(d.w)) &&
     (!listFilter.q || d.w.toLowerCase().includes(listFilter.q) || d.cn.includes(listFilter.q))
@@ -301,6 +328,12 @@ function filteredList() {
 function renderList(reset) {
   const listEl = document.getElementById('wordList');
   if (reset) { listEl.innerHTML = ''; listFilter.shown = 0; }
+  if (!showAllLib && !learnedCount) {
+    listEl.innerHTML = '<div class="card" style="text-align:center;color:#888">还没有推送单词<br>点上方按钮领取你的第一组 8 个单词吧 👆</div>';
+    document.getElementById('listMore').style.display = 'none';
+    return;
+  }
+  const newBatch = new Set(DATA.slice(Math.max(0, learnedCount - BATCH), learnedCount).map(d => d.w));
   const all = filteredList();
   const slice = all.slice(listFilter.shown, listFilter.shown + PAGE);
   listFilter.shown += slice.length;
@@ -308,9 +341,11 @@ function renderList(reset) {
     const div = document.createElement('div');
     div.className = 'witem' + (mastered.has(d.w) ? ' mastered' : '');
     const colLine = d.col ? `<div class="wcol">📎 ${esc(d.col)}${d.colcn ? ' — ' + esc(d.colcn) : ''}</div>` : '';
+    const badge = (!showAllLib && newBatch.has(d.w))
+      ? '<span style="background:#fff3e0;color:#e65100;font-size:.7rem;border-radius:4px;padding:1px 5px">🆕新</span>' : '';
     div.innerHTML = `
       <div class="wtop">
-        <span class="wword">${esc(d.w)}</span>
+        <span class="wword">${esc(d.w)}</span>${badge}
         <button class="spk">🔊</button>
         <span class="wphon">${esc(d.p)}</span>
         <span class="wpos">${esc(d.pos)}</span>
@@ -330,7 +365,12 @@ function renderList(reset) {
 }
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
 function toggleMaster(w) { mastered.has(w) ? mastered.delete(w) : mastered.add(w); saveM(); updateHead(); }
-function updateHead() { document.getElementById('headSub').textContent = `共 ${DATA.length} 词 · 已掌握 ${mastered.size}`; }
+function updateHead() { document.getElementById('headSub').textContent = `共 ${DATA.length} 词 · 已推送 ${learnedCount} · 已掌握 ${mastered.size}`; }
+document.getElementById('getBatch').addEventListener('click', () => {
+  learnedCount = Math.min(learnedCount + BATCH, DATA.length);
+  saveL(); renderBatch(); updateHead(); renderList(true);
+});
+document.getElementById('showAllLib').addEventListener('change', e => { showAllLib = e.target.checked; renderList(true); });
 
 /* ---------- 闪卡 ---------- */
 let deck = [], deckIdx = 0;
@@ -338,14 +378,14 @@ const flashCard = document.getElementById('flashCard');
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 function pool() {
   const scope = document.getElementById('flashScope').value;
-  return DATA.filter(d => scope === 'all' || !mastered.has(d.w));
+  return learnedPool().filter(d => scope === 'all' || !mastered.has(d.w));
 }
 function newDeck() { deck = shuffle([...pool()]); deckIdx = 0; showCard(); }
 function showCard() {
   flashCard.classList.remove('flipped');
   if (!deck.length) {
-    document.getElementById('flashFront').textContent = '🎉 没有可学的单词了';
-    document.getElementById('flashPhon').textContent = '已全部掌握！可在上方切换「全部单词」';
+    document.getElementById('flashFront').textContent = learnedCount ? '🎉 这组单词都掌握了' : '还没有推送单词';
+    document.getElementById('flashPhon').textContent = learnedCount ? '可在上方切换「全部单词」复习，或去列表领取新一组' : '请先到「列表」领取一组单词';
     document.getElementById('flashProg').textContent = '';
     document.getElementById('flashBack').textContent = '';
     document.getElementById('flashCol').textContent = '';
@@ -376,7 +416,7 @@ let quizLock = false;
 const quizOpts = document.getElementById('quizOpts');
 function qPool() {
   const scope = document.getElementById('quizScope').value;
-  return DATA.filter(d => scope === 'all' || !mastered.has(d.w));
+  return learnedPool().filter(d => scope === 'all' || !mastered.has(d.w));
 }
 function nextQuiz() {
   quizLock = false;
@@ -384,12 +424,12 @@ function nextQuiz() {
   quizOpts.innerHTML = '';
   const p = qPool();
   if (p.length < 4) {
-    document.getElementById('quizPrompt').textContent = '可用单词不足 4 个';
-    document.getElementById('quizPhon').textContent = '请切换范围为「全部单词」或取消一些已掌握标记';
+    document.getElementById('quizPrompt').textContent = learnedCount ? '可出题的单词不足 4 个' : '还没有推送单词';
+    document.getElementById('quizPhon').textContent = learnedCount ? '请切换范围为「全部单词」、取消一些已掌握标记，或去列表领取新一组' : '请先到「列表」领取一组单词';
     return;
   }
   const ans = p[Math.floor(Math.random() * p.length)];
-  const distract = shuffle(DATA.filter(d => d.w !== ans.w)).slice(0, 3);
+  const distract = shuffle(learnedPool().filter(d => d.w !== ans.w)).slice(0, 3);
   const opts = shuffle([ans, ...distract]);
   const e2c = Math.random() < 0.5;
   document.getElementById('quizPrompt').textContent = e2c ? ans.w : ans.cn;
@@ -426,7 +466,7 @@ let spellWord = null, spellShown = 0, spellLock = false;
 const spellInput = document.getElementById('spellInput');
 function sPool() {
   const scope = document.getElementById('spellScope').value;
-  return DATA.filter(d => scope === 'all' || !mastered.has(d.w));
+  return learnedPool().filter(d => scope === 'all' || !mastered.has(d.w));
 }
 function renderSpellHint() {
   if (!spellWord) return;
@@ -441,8 +481,8 @@ function nextSpell() {
   const p = sPool();
   if (!p.length) {
     spellWord = null;
-    document.getElementById('spellCN').textContent = '🎉 没有可练的单词了';
-    document.getElementById('spellMeta').textContent = '已全部掌握！可在上方切换「全部单词」';
+    document.getElementById('spellCN').textContent = learnedCount ? '🎉 这组单词都掌握了' : '还没有推送单词';
+    document.getElementById('spellMeta').textContent = learnedCount ? '可在上方切换「全部单词」复习，或去列表领取新一组' : '请先到「列表」领取一组单词';
     document.getElementById('spellCol').textContent = '';
     document.getElementById('spellHint').textContent = '';
     return;
@@ -523,6 +563,8 @@ function renderStats() {
     box.appendChild(div);
   });
   const qs = quizStats;
+  document.getElementById('statPush').textContent =
+    `已推送 ${learnedCount} / ${t} 词（${Math.ceil(learnedCount / BATCH)} 组）· 已掌握其中 ${learnedPool().filter(d => mastered.has(d.w)).length} 词`;
   document.getElementById('statQuiz').textContent =
     qs.total ? `${qs.total} 题，正确率 ${Math.round(qs.correct / qs.total * 100)}%` : '还没有测验记录';
   document.getElementById('statSpell').textContent =
@@ -540,6 +582,7 @@ document.getElementById('resetS').addEventListener('click', () => {
 
 /* ---------- 启动 ---------- */
 updateHead();
+renderBatch();
 renderList(true);
 </script>
 </body>
