@@ -770,32 +770,33 @@ function uniqueAssessmentWords(groups) {
   groups.flat().forEach(d => { if (!seen.has(d.w)) { seen.add(d.w); result.push(d); } });
   return result;
 }
+function masteredPool() { return learnedPool().filter(d => mastered.has(d.w)); }
 function assessmentPool() {
-  const due = shuffle([...dueWords()]);
+  const pool = masteredPool();
+  const due = shuffle(pool.filter(d => srsRec(d.w).due <= Date.now()));
   const dueSet = new Set(due.map(d => d.w));
-  const low = shuffle(learnedPool().filter(d => !dueSet.has(d.w) && srsRec(d.w).lv < 4));
-  const lowSet = new Set(low.map(d => d.w));
-  const rest = shuffle(learnedPool().filter(d => !dueSet.has(d.w) && !lowSet.has(d.w)));
-  return uniqueAssessmentWords([due, low, rest]);
+  const rest = shuffle(pool.filter(d => !dueSet.has(d.w)));
+  return uniqueAssessmentWords([due, rest]);
 }
 function renderChapterHome(resultText) {
-  const pool = learnedPool();
+  const pool = masteredPool();
   const btn = document.getElementById('chapterStart');
   const intro = document.getElementById('chapterIntro');
   document.getElementById('chapterHome').style.display = 'block';
   document.getElementById('chapterTest').style.display = 'none';
   if (pool.length < 4) {
-    intro.textContent = pool.length ? `还差 ${4 - pool.length} 个已推送词，才能组成四选一考题。` : '先到「列表」领取第一组新词，再来做综合考核。';
+    intro.textContent = pool.length ? `还差 ${4 - pool.length} 个已掌握词，才能组成四选一考题。` : '综合考核只抽已掌握词；先完成日常复习，达到 4 个已掌握词后再来。';
     btn.disabled = true;
     return;
   }
   btn.disabled = false;
-  const base = `从已推送的 ${pool.length} 个词中智能抽取 10 题，优先考待复习、等级较低和容易遗忘的词；不再划分小节。`;
+  const base = `从已掌握的 ${pool.length} 个词中智能抽取 10 题，优先复检到期词；不再划分小节。`;
   const last = assessmentStats.total ? `上次：${assessmentStats.correct}/${assessmentStats.total}。` : '';
   intro.innerHTML = resultText ? `${resultText}<br>${base}` : `${base}${last ? `<br>${last}` : ''}`;
 }
 function assessmentOptions(answer, display) {
-  return shuffle([answer, ...shuffle(learnedPool().filter(d => d.w !== answer.w)).slice(0, 3)])
+  const choices = masteredPool().length >= 4 ? masteredPool() : learnedPool();
+  return shuffle([answer, ...shuffle(choices.filter(d => d.w !== answer.w)).slice(0, 3)])
     .map(d => ({ d, label: display(d) }));
 }
 function maskAssessmentWord(text, word) {
