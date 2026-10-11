@@ -211,7 +211,7 @@
   </div>
   <div id="chapterTest" style="display:none">
     <div id="chapterProg" style="text-align:center;color:#888;font-size:.85rem;margin:10px 0"></div>
-    <div class="card" id="chapterQ"><div class="q" id="chapterPrompt"></div><div class="phon" id="chapterMeta"></div></div>
+    <div class="card" id="chapterQ"><div class="q" id="chapterPrompt"></div><div class="phon" id="chapterMeta"></div><button class="spk" id="chapterSpk" title="播放该词发音" style="display:block;margin:10px auto 0;background:#e3eaf3;border-radius:10px;padding:7px 13px;font-size:1rem">🔊 发音</button></div>
     <div class="qopts" id="chapterOpts"></div>
     <div class="row" id="chapterSpellRow" style="display:none;margin-top:14px">
       <input type="text" id="chapterInput" placeholder="输入英文单词" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="flex:1">
@@ -506,6 +506,7 @@ function renderList(reset) {
       </div>
       <div class="wcn">${esc(d.cn)}</div>${colLine}`;
     div.querySelector('.wword').addEventListener('click', () => speak(d.w));
+    div.querySelector('.wcn').addEventListener('click', () => speak(d.w));
     div.querySelector('.spk').addEventListener('click', () => speak(d.w));
     div.querySelector('.star').addEventListener('click', ev => {
       toggleMaster(d.w);
@@ -599,7 +600,7 @@ function showCard() {
   document.getElementById('flashBack').textContent = e2c ? `${d.cn}${d.pos ? '（' + d.pos + '）' : ''}` : `${d.w} ${d.p}`;
   document.getElementById('flashCol').textContent = d.col ? `📎 ${d.col}${d.colcn ? ' — ' + d.colcn : ''}` : '';
   document.getElementById('flashProg').textContent = `第 ${deckIdx + 1} / ${deck.length} 张 · 待复习 ${dueWords().length} 词`;
-  if (document.getElementById('flashAuto').checked && e2c) speak(d.w);
+  if (document.getElementById('flashAuto').checked) speak(d.w);
 }
 flashCard.addEventListener('click', () => {
   flashCard.classList.toggle('flipped');
@@ -646,7 +647,7 @@ function nextQuiz() {
   const e2c = Math.random() < 0.5;
   document.getElementById('quizPrompt').textContent = e2c ? ans.w : ans.cn;
   document.getElementById('quizPhon').textContent = e2c ? ans.p : '选择对应的英文单词';
-  if (e2c) speak(ans.w);
+  speak(ans.w); // 题目出现时自动读出目标词；中文题也可借此练习听辨
   opts.forEach(o => {
     const b = document.createElement('button');
     b.className = 'qopt';
@@ -794,6 +795,10 @@ function chapterOptions(answer, display) {
   return shuffle([answer, ...shuffle(learnedPool().filter(d => d.w !== answer.w)).slice(0, 3)])
     .map(d => ({ d, label: display(d) }));
 }
+function maskChapterWord(text, word) {
+  const escaped = String(word).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(text).replace(new RegExp(`\\b${escaped}\\b`, 'gi'), '_____');
+}
 function startChapter() {
   chapterNo = Number(chapterPick.value);
   const words = chapterWords(chapterNo);
@@ -813,10 +818,12 @@ function nextChapterQuestion() {
   if (chapterIdx >= chapterDeck.length) { finishChapter(); return; }
   const d = chapterDeck[chapterIdx];
   const type = chapterIdx % 4;
-  chapterMode = type === 3 ? 'spell' : type === 2 && d.col ? 'collocation' : type === 1 ? 'c2e' : 'e2c';
+  const maskedCollocation = d.col ? maskChapterWord(d.col, d.w) : '';
+  chapterMode = type === 3 ? 'spell' : type === 2 && maskedCollocation && maskedCollocation !== d.col ? 'collocation' : type === 1 ? 'c2e' : 'e2c';
   document.getElementById('chapterProg').textContent = `第 ${chapterNo} 节 · 第 ${chapterIdx + 1}/${chapterDeck.length} 题`;
   const prompt = document.getElementById('chapterPrompt');
   const meta = document.getElementById('chapterMeta');
+  speak(d.w); // 每道章节题出现时自动播放目标词发音
   if (chapterMode === 'spell') {
     prompt.textContent = d.cn;
     meta.textContent = `请拼写英文单词${d.colcn ? ` · 搭配：${d.colcn}` : ''}`;
@@ -825,8 +832,8 @@ function nextChapterQuestion() {
     return;
   }
   if (chapterMode === 'collocation') {
-    prompt.textContent = d.col;
-    meta.textContent = d.colcn ? `搭配含义：${d.colcn}` : '选择其中的重点单词';
+    prompt.textContent = maskedCollocation;
+    meta.textContent = d.colcn ? `搭配含义：${d.colcn}` : '选择填入空格的重点单词';
   } else if (chapterMode === 'c2e') {
     prompt.textContent = d.cn; meta.textContent = '选择对应的英文单词';
   } else {
@@ -844,7 +851,7 @@ function chapterAnswer(right) {
   if (chapterLock) return;
   chapterLock = true;
   const d = chapterDeck[chapterIdx];
-  if (right) chapterCorrect++;
+  if (right) { chapterCorrect++; speak(d.w); } // 答对后再次强化正确读音
   // 词义/搭配选择最多巩固到 Lv4；章节拼写正确才可取得 Lv5。
   grade(d.w, right ? 1 : null, right ? null : 0, true, chapterMode === 'spell' ? 5 : 4);
   document.querySelectorAll('#chapterOpts .qopt').forEach(b => {
@@ -873,6 +880,7 @@ function finishChapter() {
 }
 document.getElementById('chapterStart').addEventListener('click', startChapter);
 document.getElementById('chapterGo').addEventListener('click', chapterSpellAnswer);
+document.getElementById('chapterSpk').addEventListener('click', () => { const d = chapterDeck[chapterIdx]; if (d) speak(d.w); });
 document.getElementById('chapterInput').addEventListener('keydown', e => { if (e.key === 'Enter') chapterSpellAnswer(); });
 document.getElementById('chapterNext').addEventListener('click', () => { chapterIdx++; nextChapterQuestion(); });
 
