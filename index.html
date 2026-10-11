@@ -202,12 +202,9 @@
 <!-- 章节考核 -->
 <div class="view" id="v-chapter">
   <div class="card" id="chapterHome">
-    <div style="font-size:1.1rem;font-weight:600">🏁 章节考核</div>
+    <div style="font-size:1.1rem;font-weight:600">🏁 综合考核</div>
     <div id="chapterIntro" style="color:#667;font-size:.9rem;line-height:1.6;margin:8px 0"></div>
-    <div class="row">
-      <select id="chapterPick" style="flex:1"></select>
-      <button class="btn" id="chapterStart">开始考核</button>
-    </div>
+    <button class="btn" id="chapterStart" style="width:100%">开始 10 题综合考核</button>
   </div>
   <div id="chapterTest" style="display:none">
     <div id="chapterProg" style="text-align:center;color:#888;font-size:.85rem;margin:10px 0"></div>
@@ -281,7 +278,8 @@ let quizStats = LS.get('quiz', { total: 0, correct: 0 });
 let spellStats = LS.get('spell', { total: 0, correct: 0 });
 let learnedCount = LS.get('learned', 0);   // 已扫描的词库位置，兼容旧版进度
 let dailyNew = LS.get('dailyNew', { date: '', count: 0 });
-let chapterStats = LS.get('chapters', {});
+let chapterStats = LS.get('chapters', {}); // 保留旧版章节记录，供旧备份兼容
+let assessmentStats = LS.get('assessment', { total: 0, correct: 0, last: 0 });
 const saveM = () => LS.set('mastered', [...mastered]);
 const saveIgnored = () => LS.set('ignored', [...ignored]);
 const saveQ = () => LS.set('quiz', quizStats);
@@ -289,6 +287,7 @@ const saveS = () => LS.set('spell', spellStats);
 const saveL = () => LS.set('learned', learnedCount);
 const saveDailyNew = () => LS.set('dailyNew', dailyNew);
 const saveChapters = () => LS.set('chapters', chapterStats);
+const saveAssessment = () => LS.set('assessment', assessmentStats);
 function todayKey() { return new Date().toDateString(); }
 function todayNewCount() {
   if (dailyNew.date !== todayKey()) dailyNew = { date: todayKey(), count: 0 };
@@ -763,97 +762,100 @@ spellInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') { spellLock ? nextSpell() : checkSpell(); }
 });
 
-/* ---------- 章节考核：每 40 词一节，考核结果分流后续复习 ---------- */
-const CHAPTER_QUESTIONS = 10;
-let chapterNo = 0, chapterDeck = [], chapterIdx = 0, chapterCorrect = 0, chapterLock = false, chapterMode = '';
-const chapterPick = document.getElementById('chapterPick');
-function chapterWords(n) { return availableData().slice((n - 1) * CHAPTER_SIZE, n * CHAPTER_SIZE); }
-function renderChapterHome() {
-  const unlocked = Math.floor(learnedPool().length / CHAPTER_SIZE);
-  chapterPick.innerHTML = '';
-  if (!unlocked) {
-    document.getElementById('chapterIntro').textContent = `每 ${CHAPTER_SIZE} 词一节；再学习 ${CHAPTER_SIZE - learnedPool().length} 个词后可参加第 1 节考核。`;
-    chapterPick.disabled = true;
-    document.getElementById('chapterStart').disabled = true;
-    return;
-  }
-  for (let i = 1; i <= unlocked; i++) {
-    const record = chapterStats[i];
-    const opt = document.createElement('option');
-    opt.value = i;
-    opt.textContent = `第 ${i} 节 · ${CHAPTER_SIZE} 词${record ? ` · 最佳 ${record.score}/${record.total}` : ' · 未考核'}`;
-    chapterPick.appendChild(opt);
-  }
-  chapterPick.value = String(unlocked);
-  document.getElementById('chapterIntro').textContent = `每节随机 ${CHAPTER_QUESTIONS} 题，包含词义、搭配与拼写。错词会回到近期复习；拼写题答对才可以升到 Lv5。`;
-  chapterPick.disabled = false;
-  document.getElementById('chapterStart').disabled = false;
+/* ---------- 综合考核：不分小节，从已推送词中智能抽题 ---------- */
+const ASSESSMENT_QUESTIONS = 10;
+let assessmentDeck = [], assessmentIdx = 0, assessmentCorrect = 0, assessmentLock = false, assessmentMode = '';
+function uniqueAssessmentWords(groups) {
+  const seen = new Set(), result = [];
+  groups.flat().forEach(d => { if (!seen.has(d.w)) { seen.add(d.w); result.push(d); } });
+  return result;
+}
+function assessmentPool() {
+  const due = shuffle([...dueWords()]);
+  const dueSet = new Set(due.map(d => d.w));
+  const low = shuffle(learnedPool().filter(d => !dueSet.has(d.w) && srsRec(d.w).lv < 4));
+  const lowSet = new Set(low.map(d => d.w));
+  const rest = shuffle(learnedPool().filter(d => !dueSet.has(d.w) && !lowSet.has(d.w)));
+  return uniqueAssessmentWords([due, low, rest]);
+}
+function renderChapterHome(resultText) {
+  const pool = learnedPool();
+  const btn = document.getElementById('chapterStart');
+  const intro = document.getElementById('chapterIntro');
   document.getElementById('chapterHome').style.display = 'block';
   document.getElementById('chapterTest').style.display = 'none';
+  if (pool.length < 4) {
+    intro.textContent = pool.length ? `还差 ${4 - pool.length} 个已推送词，才能组成四选一考题。` : '先到「列表」领取第一组新词，再来做综合考核。';
+    btn.disabled = true;
+    return;
+  }
+  btn.disabled = false;
+  const base = `从已推送的 ${pool.length} 个词中智能抽取 10 题，优先考待复习、等级较低和容易遗忘的词；不再划分小节。`;
+  const last = assessmentStats.total ? `上次：${assessmentStats.correct}/${assessmentStats.total}。` : '';
+  intro.innerHTML = resultText ? `${resultText}<br>${base}` : `${base}${last ? `<br>${last}` : ''}`;
 }
-function chapterOptions(answer, display) {
+function assessmentOptions(answer, display) {
   return shuffle([answer, ...shuffle(learnedPool().filter(d => d.w !== answer.w)).slice(0, 3)])
     .map(d => ({ d, label: display(d) }));
 }
-function maskChapterWord(text, word) {
+function maskAssessmentWord(text, word) {
   const escaped = String(word).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return String(text).replace(new RegExp(`\\b${escaped}\\b`, 'gi'), '_____');
 }
 function startChapter() {
-  chapterNo = Number(chapterPick.value);
-  const words = chapterWords(chapterNo);
-  if (words.length < CHAPTER_SIZE) return;
-  chapterDeck = shuffle([...words]).slice(0, Math.min(CHAPTER_QUESTIONS, words.length));
-  chapterIdx = 0; chapterCorrect = 0;
+  const pool = assessmentPool();
+  if (pool.length < 4) { renderChapterHome(); return; }
+  assessmentDeck = pool.slice(0, Math.min(ASSESSMENT_QUESTIONS, pool.length));
+  assessmentIdx = 0; assessmentCorrect = 0;
   document.getElementById('chapterHome').style.display = 'none';
   document.getElementById('chapterTest').style.display = 'block';
-  nextChapterQuestion();
+  nextAssessmentQuestion();
 }
-function nextChapterQuestion() {
-  chapterLock = false;
+function nextAssessmentQuestion() {
+  assessmentLock = false;
   document.getElementById('chapterNext').style.display = 'none';
   document.getElementById('chapterResult').textContent = '';
   document.getElementById('chapterOpts').innerHTML = '';
   document.getElementById('chapterSpellRow').style.display = 'none';
-  if (chapterIdx >= chapterDeck.length) { finishChapter(); return; }
-  const d = chapterDeck[chapterIdx];
-  const type = chapterIdx % 4;
-  const maskedCollocation = d.col ? maskChapterWord(d.col, d.w) : '';
-  chapterMode = type === 3 ? 'spell' : type === 2 && maskedCollocation && maskedCollocation !== d.col ? 'collocation' : type === 1 ? 'c2e' : 'e2c';
-  document.getElementById('chapterProg').textContent = `第 ${chapterNo} 节 · 第 ${chapterIdx + 1}/${chapterDeck.length} 题`;
+  if (assessmentIdx >= assessmentDeck.length) { finishAssessment(); return; }
+  const d = assessmentDeck[assessmentIdx];
+  const type = assessmentIdx % 4;
+  const maskedCollocation = d.col ? maskAssessmentWord(d.col, d.w) : '';
+  assessmentMode = type === 3 ? 'spell' : type === 2 && maskedCollocation && maskedCollocation !== d.col ? 'collocation' : type === 1 ? 'c2e' : 'e2c';
+  document.getElementById('chapterProg').textContent = `综合考核 · 第 ${assessmentIdx + 1}/${assessmentDeck.length} 题`;
   const prompt = document.getElementById('chapterPrompt');
   const meta = document.getElementById('chapterMeta');
-  speak(d.w); // 每道章节题出现时自动播放目标词发音
-  if (chapterMode === 'spell') {
+  speak(d.w);
+  if (assessmentMode === 'spell') {
     prompt.textContent = d.cn;
     meta.textContent = `请拼写英文单词${d.colcn ? ` · 搭配：${d.colcn}` : ''}`;
     document.getElementById('chapterSpellRow').style.display = 'flex';
     const input = document.getElementById('chapterInput'); input.value = ''; setTimeout(() => input.focus(), 100);
     return;
   }
-  if (chapterMode === 'collocation') {
+  if (assessmentMode === 'collocation') {
     prompt.textContent = maskedCollocation;
     meta.textContent = d.colcn ? `搭配含义：${d.colcn}` : '选择填入空格的重点单词';
-  } else if (chapterMode === 'c2e') {
+  } else if (assessmentMode === 'c2e') {
     prompt.textContent = d.cn; meta.textContent = '选择对应的英文单词';
   } else {
     prompt.textContent = d.w; meta.textContent = d.p || '选择对应的中文释义';
   }
-  const display = chapterMode === 'e2c' ? x => x.cn : x => x.w;
-  chapterOptions(d, display).forEach(({ d: option, label }) => {
+  const display = assessmentMode === 'e2c' ? x => x.cn : x => x.w;
+  assessmentOptions(d, display).forEach(({ d: option, label }) => {
     const b = document.createElement('button');
     b.className = 'qopt'; b.textContent = label; b.dataset.word = option.w;
-    b.addEventListener('click', () => chapterAnswer(option.w === d.w));
+    b.addEventListener('click', () => assessmentAnswer(option.w === d.w));
     document.getElementById('chapterOpts').appendChild(b);
   });
 }
-function chapterAnswer(right) {
-  if (chapterLock) return;
-  chapterLock = true;
-  const d = chapterDeck[chapterIdx];
-  if (right) { chapterCorrect++; speak(d.w); } // 答对后再次强化正确读音
-  // 词义/搭配选择最多巩固到 Lv4；章节拼写正确才可取得 Lv5。
-  grade(d.w, right ? 1 : null, right ? null : 0, true, chapterMode === 'spell' ? 5 : 4);
+function assessmentAnswer(right) {
+  if (assessmentLock) return;
+  assessmentLock = true;
+  const d = assessmentDeck[assessmentIdx];
+  if (right) { assessmentCorrect++; speak(d.w); }
+  // 答错立即回近期复习；答对仅在该词到期时升级，避免反复做综合考核刷等级。
+  grade(d.w, right ? 1 : null, right ? null : 0, !right, assessmentMode === 'spell' ? 5 : 4);
   document.querySelectorAll('#chapterOpts .qopt').forEach(b => {
     b.disabled = true;
     if (b.dataset.word === d.w) b.classList.add('right');
@@ -863,27 +865,24 @@ function chapterAnswer(right) {
   result.textContent = right ? '✓ 正确，已安排下一次复习' : `✗ 这词会在 10 分钟后重新复习：${d.w}`;
   document.getElementById('chapterNext').style.display = 'block';
 }
-function chapterSpellAnswer() {
-  if (chapterLock) return;
-  const d = chapterDeck[chapterIdx];
+function assessmentSpellAnswer() {
+  if (assessmentLock) return;
+  const d = assessmentDeck[assessmentIdx];
   const input = document.getElementById('chapterInput');
   if (!input.value.trim()) { input.focus(); return; }
-  chapterAnswer(input.value.trim().toLowerCase() === d.w.toLowerCase());
+  assessmentAnswer(input.value.trim().toLowerCase() === d.w.toLowerCase());
 }
-function finishChapter() {
-  const previous = chapterStats[chapterNo];
-  if (!previous || chapterCorrect >= previous.score) chapterStats[chapterNo] = { score: chapterCorrect, total: chapterDeck.length, at: Date.now() };
-  saveChapters();
-  const passed = chapterCorrect / chapterDeck.length >= .8;
-  renderChapterHome();
-  document.getElementById('chapterIntro').innerHTML = `<strong style="color:${passed ? '#2e7d32' : '#b06000'}">${passed ? '✓ 本节通过' : '继续巩固'}</strong>　第 ${chapterNo} 节：${chapterCorrect}/${chapterDeck.length} 题正确。${passed ? '答对词会按间隔继续复习；错词已回到近期队列。' : '不需要重头再来，错词会自动优先复习，准备好可再考。'}`;
+function finishAssessment() {
+  assessmentStats = { total: assessmentDeck.length, correct: assessmentCorrect, last: Date.now() };
+  saveAssessment();
+  const passed = assessmentCorrect / assessmentDeck.length >= .8;
+  renderChapterHome(`<strong style="color:${passed ? '#2e7d32' : '#b06000'}">${passed ? '✓ 本次表现很好' : '继续巩固'}</strong>　本次 ${assessmentCorrect}/${assessmentDeck.length} 题正确；错词已回到近期复习。`);
 }
 document.getElementById('chapterStart').addEventListener('click', startChapter);
-document.getElementById('chapterGo').addEventListener('click', chapterSpellAnswer);
-document.getElementById('chapterSpk').addEventListener('click', () => { const d = chapterDeck[chapterIdx]; if (d) speak(d.w); });
-document.getElementById('chapterInput').addEventListener('keydown', e => { if (e.key === 'Enter') chapterSpellAnswer(); });
-document.getElementById('chapterNext').addEventListener('click', () => { chapterIdx++; nextChapterQuestion(); });
-
+document.getElementById('chapterGo').addEventListener('click', assessmentSpellAnswer);
+document.getElementById('chapterSpk').addEventListener('click', () => { const d = assessmentDeck[assessmentIdx]; if (d) speak(d.w); });
+document.getElementById('chapterInput').addEventListener('keydown', e => { if (e.key === 'Enter') assessmentSpellAnswer(); });
+document.getElementById('chapterNext').addEventListener('click', () => { assessmentIdx++; nextAssessmentQuestion(); });
 /* ---------- 统计 ---------- */
 function renderStats() {
   const t = availableData().length, m = mastered.size;
@@ -948,7 +947,7 @@ const b64d = s => decodeURIComponent(escape(atob(s)));
 const VALID_WORDS = new Set(DATA.map(d => d.w));
 document.getElementById('expBtn').addEventListener('click', async () => {
   const code = 'BF1.' + b64e(JSON.stringify({
-    v: 3, learned: learnedCount, mastered: [...mastered], ignored: [...ignored], quiz: quizStats, spell: spellStats, srs, dailyNew, chapters: chapterStats
+    v: 3, learned: learnedCount, mastered: [...mastered], ignored: [...ignored], quiz: quizStats, spell: spellStats, srs, dailyNew, chapters: chapterStats, assessment: assessmentStats
   }));
   const box = document.getElementById('backupBox');
   const msg = document.getElementById('backupMsg');
@@ -973,6 +972,7 @@ document.getElementById('impBtn').addEventListener('click', () => {
     mastered = new Set(d.mastered.filter(w => VALID_WORDS.has(w) && !ignored.has(w)));
     dailyNew = (d.dailyNew && typeof d.dailyNew.count === 'number' && typeof d.dailyNew.date === 'string') ? d.dailyNew : { date: '', count: 0 };
     chapterStats = (d.chapters && typeof d.chapters === 'object') ? d.chapters : {};
+    assessmentStats = (d.assessment && typeof d.assessment.total === 'number') ? d.assessment : { total: 0, correct: 0, last: 0 };
     quizStats = (d.quiz && typeof d.quiz.total === 'number') ? d.quiz : { total: 0, correct: 0 };
     spellStats = (d.spell && typeof d.spell.total === 'number') ? d.spell : { total: 0, correct: 0 };
     srs = (d.srs && typeof d.srs === 'object') ? d.srs : {};   // 旧版进度码没有 srs，靠 migrateSRS 重建
@@ -982,7 +982,7 @@ document.getElementById('impBtn').addEventListener('click', () => {
       else r.lv = Math.max(0, Math.min(5, Math.round(r.lv)));
     });
     migrateSRS();
-    saveM(); saveIgnored(); saveQ(); saveS(); saveL(); saveSRS(); saveDailyNew(); saveChapters();
+    saveM(); saveIgnored(); saveQ(); saveS(); saveL(); saveSRS(); saveDailyNew(); saveChapters(); saveAssessment();
     updateHead(); renderBatch(); renderList(true); renderStats();
     deck = []; quizOpts.innerHTML = '';   // 让闪卡/测验下次进入时重新出题
     msg.style.color = '#2e7d32';
