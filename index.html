@@ -239,6 +239,7 @@
     </div>
     <textarea id="backupBox" placeholder="点「导出」后进度码显示在这里；把之前保存的进度码粘贴到这里再点「导入」即可恢复"
       style="width:100%;margin-top:8px;font-size:.75rem;padding:8px;border:1px solid #ccc;border-radius:8px;min-height:64px;font-family:monospace;resize:vertical"></textarea>
+    <button class="btn ghost" id="copyBackup" style="width:100%;margin-top:8px">📋 复制上方进度码</button>
     <div id="backupMsg" style="font-size:.85rem;margin-top:4px;text-align:center;min-height:1.2em"></div>
     <div style="font-size:.75rem;color:#999;margin-top:4px">建议：每周导出一次，把进度码粘贴到微信收藏或备忘录里保存。</div>
     </div>
@@ -941,20 +942,44 @@ document.getElementById('restoreIgnored').addEventListener('click', () => {
 const b64e = s => btoa(unescape(encodeURIComponent(s)));
 const b64d = s => decodeURIComponent(escape(atob(s)));
 const VALID_WORDS = new Set(DATA.map(d => d.w));
+function selectBackupBox() {
+  const box = document.getElementById('backupBox');
+  box.focus({ preventScroll: true });
+  box.select();
+  box.setSelectionRange(0, box.value.length);
+  return box;
+}
+async function copyBackupCode() {
+  const box = document.getElementById('backupBox');
+  const code = box.value.trim();
+  if (!code) return false;
+  // 先使用现代剪贴板接口；微信等内置浏览器常会拒绝它，再回退到选中并复制。
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(code);
+      return true;
+    }
+  } catch (e) {}
+  selectBackupBox();
+  try { return !!document.execCommand('copy'); } catch (e) { return false; }
+}
+function showCopyMessage(copied) {
+  const msg = document.getElementById('backupMsg');
+  msg.style.color = copied ? '#2e7d32' : '#b06000';
+  msg.textContent = copied
+    ? '✅ 进度码已复制！粘贴到微信收藏或备忘录保存'
+    : '⚠️ 浏览器禁止自动复制：进度码已选中，请长按后选择“复制”';
+}
 document.getElementById('expBtn').addEventListener('click', async () => {
   const code = 'BF1.' + b64e(JSON.stringify({
     v: 5, learned: learnedCount, mastered: [...mastered], ignored: [...ignored], quiz: quizStats, spell: spellStats, srs, dailyNew, studyDays, chapters: chapterStats, assessment: assessmentStats
   }));
   const box = document.getElementById('backupBox');
-  const msg = document.getElementById('backupMsg');
   box.value = code;
-  let copied = false;
-  try { await navigator.clipboard.writeText(code); copied = true; }
-  catch (e) { box.focus(); box.select(); try { copied = document.execCommand('copy'); } catch (e2) {} }
-  msg.style.color = '#2e7d32';
-  msg.textContent = copied
-    ? '✅ 进度码已复制！粘贴到微信收藏或备忘录保存'
-    : '请长按上方进度码，全选并复制保存';
+  showCopyMessage(await copyBackupCode());
+});
+document.getElementById('copyBackup').addEventListener('click', async () => {
+  showCopyMessage(await copyBackupCode());
 });
 document.getElementById('impBtn').addEventListener('click', () => {
   const raw = document.getElementById('backupBox').value.trim();
