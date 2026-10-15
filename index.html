@@ -93,6 +93,7 @@
 <header>
   <h1>倍福技术英语 2000 词</h1>
   <div class="sub" id="headSub">Beckhoff 自动化技术词汇</div>
+  <div class="sub">✨ 已更新 v6：学习与复习分开 · 复习按学习日计算</div>
 </header>
 
 <!-- 列表 -->
@@ -232,14 +233,20 @@
     </div>
     <button class="btn ghost" id="restoreIgnored" style="width:100%;margin-top:8px;display:none">恢复全部已忽略词</button>
     <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-    <div style="font-size:.95rem;margin-bottom:6px">💾 进度备份（换设备 / 防清理丢失）</div>
+    <div style="font-size:.95rem;margin-bottom:6px">💾 进度备份 · v6（换设备 / 防清理丢失）</div>
     <div class="row">
-      <button class="btn ghost" id="expBtn" style="flex:1">📤 导出进度码</button>
+      <button class="btn ghost" id="expBtn" style="flex:1">📤 生成进度码</button>
       <button class="btn ghost" id="impBtn" style="flex:1">📥 导入进度码</button>
     </div>
     <textarea id="backupBox" placeholder="点「导出」后进度码显示在这里；把之前保存的进度码粘贴到这里再点「导入」即可恢复"
       style="width:100%;margin-top:8px;font-size:.75rem;padding:8px;border:1px solid #ccc;border-radius:8px;min-height:64px;font-family:monospace;resize:vertical"></textarea>
-    <button class="btn ghost" id="copyBackup" style="width:100%;margin-top:8px">📋 复制上方进度码</button>
+    <button class="btn ghost" id="copyBackup" style="width:100%;margin-top:8px">📋 复制进度码</button>
+    <div class="row" style="margin-top:8px">
+      <button class="btn ghost" id="shareBackup" style="flex:1">↗️ 系统分享</button>
+      <button class="btn ghost" id="downloadBackup" style="flex:1">💾 保存备份文件</button>
+    </div>
+    <button class="btn ghost" id="importBackupFile" style="width:100%;margin-top:8px">📂 从备份文件恢复</button>
+    <input type="file" id="backupFileInput" accept=".txt,text/plain" style="display:none">
     <div id="backupMsg" style="font-size:.85rem;margin-top:4px;text-align:center;min-height:1.2em"></div>
     <div style="font-size:.75rem;color:#999;margin-top:4px">建议：每周导出一次，把进度码粘贴到微信收藏或备忘录里保存。</div>
     </div>
@@ -942,33 +949,80 @@ document.getElementById('restoreIgnored').addEventListener('click', () => {
 const b64e = s => btoa(unescape(encodeURIComponent(s)));
 const b64d = s => decodeURIComponent(escape(atob(s)));
 const VALID_WORDS = new Set(DATA.map(d => d.w));
-function selectBackupBox() {
-  const box = document.getElementById('backupBox');
-  box.focus({ preventScroll: true });
-  box.select();
-  box.setSelectionRange(0, box.value.length);
-  return box;
+function setBackupMessage(text, color = '#2e7d32') {
+  const msg = document.getElementById('backupMsg');
+  msg.style.color = color;
+  msg.textContent = text;
+}
+function getBackupCode() {
+  const code = document.getElementById('backupBox').value.trim();
+  if (!code) setBackupMessage('请先点“生成进度码”', '#b06000');
+  return code;
+}
+function legacyCopy(text) {
+  // 不再选中页面上的文字；仅使用临时隐藏输入框尝试兼容旧浏览器复制。
+  const helper = document.createElement('textarea');
+  helper.value = text;
+  helper.setAttribute('readonly', '');
+  helper.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;pointer-events:none';
+  document.body.appendChild(helper);
+  helper.focus(); helper.select(); helper.setSelectionRange(0, text.length);
+  let copied = false;
+  try { copied = !!document.execCommand('copy'); } catch (e) {}
+  helper.remove();
+  return copied;
 }
 async function copyBackupCode() {
-  const box = document.getElementById('backupBox');
-  const code = box.value.trim();
-  if (!code) return false;
-  // 先使用现代剪贴板接口；微信等内置浏览器常会拒绝它，再回退到选中并复制。
+  const code = getBackupCode();
+  if (!code) return 'empty';
+  // 部分微信浏览器会让 writeText 一直等待；800ms 后立即回退，避免按钮没有反应。
   try {
     if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(code);
-      return true;
+      let timer;
+      const copied = await Promise.race([
+        navigator.clipboard.writeText(code).then(() => true).catch(() => false),
+        new Promise(resolve => { timer = setTimeout(() => resolve(false), 800); })
+      ]);
+      clearTimeout(timer);
+      if (copied) return 'copied';
     }
   } catch (e) {}
-  selectBackupBox();
-  try { return !!document.execCommand('copy'); } catch (e) { return false; }
+  return legacyCopy(code) ? 'copied' : 'blocked';
 }
-function showCopyMessage(copied) {
-  const msg = document.getElementById('backupMsg');
-  msg.style.color = copied ? '#2e7d32' : '#b06000';
-  msg.textContent = copied
-    ? '✅ 进度码已复制！粘贴到微信收藏或备忘录保存'
-    : '⚠️ 浏览器禁止自动复制：进度码已选中，请长按后选择“复制”';
+function showCopyMessage(result) {
+  if (result === 'copied') setBackupMessage('✅ 进度码已复制！粘贴到微信收藏或备忘录保存');
+  else if (result === 'blocked') setBackupMessage('⚠️ 当前浏览器禁止复制，请点“保存备份文件”或“系统分享”', '#b06000');
+}
+function downloadBackupFile() {
+  const code = getBackupCode();
+  if (!code) return;
+  const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `bf-words-progress-v6-${studyDayKey()}.txt`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setBackupMessage('✅ 已开始保存备份文件；可在“文件/下载”中找到它');
+}
+async function shareBackupFile() {
+  const code = getBackupCode();
+  if (!code) return;
+  if (!navigator.share) {
+    setBackupMessage('⚠️ 此浏览器不支持系统分享，请点“保存备份文件”', '#b06000');
+    return;
+  }
+  try {
+    const file = new File([code], `bf-words-progress-v6-${studyDayKey()}.txt`, { type: 'text/plain' });
+    if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+      await navigator.share({ title: '倍福英语学习进度备份', text: '我的学习进度备份文件', files: [file] });
+    } else {
+      await navigator.share({ title: '倍福英语学习进度备份', text: code });
+    }
+    setBackupMessage('✅ 已打开系统分享；请选择保存位置或发送给自己');
+  } catch (e) {
+    if (e && e.name !== 'AbortError') setBackupMessage('⚠️ 分享失败，请改用“保存备份文件”', '#b06000');
+  }
 }
 document.getElementById('expBtn').addEventListener('click', async () => {
   const code = 'BF1.' + b64e(JSON.stringify({
@@ -976,10 +1030,27 @@ document.getElementById('expBtn').addEventListener('click', async () => {
   }));
   const box = document.getElementById('backupBox');
   box.value = code;
+  setBackupMessage('正在尝试复制进度码…');
   showCopyMessage(await copyBackupCode());
 });
 document.getElementById('copyBackup').addEventListener('click', async () => {
+  setBackupMessage('正在尝试复制进度码…');
   showCopyMessage(await copyBackupCode());
+});
+document.getElementById('downloadBackup').addEventListener('click', downloadBackupFile);
+document.getElementById('shareBackup').addEventListener('click', shareBackupFile);
+document.getElementById('importBackupFile').addEventListener('click', () => document.getElementById('backupFileInput').click());
+document.getElementById('backupFileInput').addEventListener('change', event => {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    document.getElementById('backupBox').value = String(reader.result || '').trim();
+    document.getElementById('impBtn').click();
+  };
+  reader.onerror = () => setBackupMessage('⚠️ 读取备份文件失败，请重新选择文件', '#b06000');
+  reader.readAsText(file, 'utf-8');
+  event.target.value = '';
 });
 document.getElementById('impBtn').addEventListener('click', () => {
   const raw = document.getElementById('backupBox').value.trim();
