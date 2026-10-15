@@ -106,8 +106,7 @@
   </div>
   <div class="toolbar">
     <input type="text" id="search" placeholder="🔍 搜索单词 / 中文">
-    <label class="opt"><input type="checkbox" id="listHideM"> 隐藏已掌握</label>
-    <label class="opt"><input type="checkbox" id="showAllLib"> 浏览全部词库</label>
+    <span style="font-size:.82rem;color:#667">仅显示积分未满 2 分的新词</span>
   </div>
   <div class="chips" id="priChips"></div>
   <div id="wordList"></div>
@@ -424,7 +423,6 @@ const BATCH = 8;
 const CHAPTER_SIZE = 40;
 const learnedPool = () => DATA.slice(0, learnedCount).filter(d => !ignored.has(d.w));
 const availableData = () => DATA.filter(d => !ignored.has(d.w));
-let showAllLib = false;
 function renderBatch() {
   const pushed = learnedPool().length;
   const total = availableData().length;
@@ -499,35 +497,39 @@ const chipsEl = document.getElementById('priChips');
   chipsEl.appendChild(c);
 });
 document.getElementById('search').addEventListener('input', e => { listFilter.q = e.target.value.trim().toLowerCase(); renderList(true); });
-document.getElementById('listHideM').addEventListener('change', e => { listFilter.hideM = e.target.checked; renderList(true); });
 document.getElementById('listMore').addEventListener('click', () => renderList(false));
 
 function filteredList() {
-  const base = showAllLib ? DATA : DATA.slice(0, learnedCount);
+  // 列表页只展示还在学习中的新词；达到 2 分后由“复习”页接管。
+  const base = learningWords();
   return base.filter(d =>
     !ignored.has(d.w) &&
     (!listFilter.pri || d.pri === listFilter.pri) &&
-    (!listFilter.hideM || !mastered.has(d.w)) &&
     (!listFilter.q || d.w.toLowerCase().includes(listFilter.q) || d.cn.includes(listFilter.q))
   );
 }
 function renderList(reset) {
   const listEl = document.getElementById('wordList');
   if (reset) { listEl.innerHTML = ''; listFilter.shown = 0; }
-  if (!showAllLib && !learnedCount) {
+  if (!learnedCount) {
     listEl.innerHTML = '<div class="card" style="text-align:center;color:#888">还没有推送单词<br>点上方按钮领取你的第一组 8 个单词吧 👆</div>';
     document.getElementById('listMore').style.display = 'none';
     return;
   }
   const newBatch = new Set(DATA.slice(Math.max(0, learnedCount - BATCH), learnedCount).map(d => d.w));
   const all = filteredList();
+  if (!all.length) {
+    listEl.innerHTML = '<div class="card" style="text-align:center;color:#888">🎉 当前没有需要学习的新词<br>积分达到 2 分的单词已转入「复习」页</div>';
+    document.getElementById('listMore').style.display = 'none';
+    return;
+  }
   const slice = all.slice(listFilter.shown, listFilter.shown + PAGE);
   listFilter.shown += slice.length;
   slice.forEach(d => {
     const div = document.createElement('div');
     div.className = 'witem' + (mastered.has(d.w) ? ' mastered' : '');
     const colLine = d.col ? `<div class="wcol">📎 ${esc(d.col)}${d.colcn ? ' — ' + esc(d.colcn) : ''}</div>` : '';
-    const badge = (!showAllLib && newBatch.has(d.w))
+    const badge = newBatch.has(d.w)
       ? '<span style="background:#fff3e0;color:#e65100;font-size:.7rem;border-radius:4px;padding:1px 5px">🆕新</span>' : '';
     div.innerHTML = `
       <div class="wtop">
@@ -597,7 +599,6 @@ document.getElementById('getBatch').addEventListener('click', () => {
   }
   saveSRS(); saveL(); renderBatch(); updateHead(); renderList(true);
 });
-document.getElementById('showAllLib').addEventListener('change', e => { showAllLib = e.target.checked; renderList(true); });
 
 /* ---------- 闪卡 ---------- */
 let deck = [], deckIdx = 0, lastCard = null;
